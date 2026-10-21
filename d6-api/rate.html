@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>환율 계산기</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 16px; font-family: "Malgun Gothic", sans-serif; background: #f2f5fa; color: #1f2937; }
+  main { max-width: 560px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .sub { color: #6b7280; font-size: 14px; margin: 0 0 20px; }
+  .card { background: #fff; border-radius: 14px; padding: 18px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  .card h2 { font-size: 15px; margin: 0 0 12px; color: #374151; }
+  .row { display: flex; gap: 10px; }
+  label { display: block; font-size: 13px; color: #6b7280; margin-bottom: 4px; }
+  input, select { width: 100%; padding: 10px; font-size: 16px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; }
+  .field { flex: 1; }
+  .result { font-size: 30px; font-weight: bold; margin: 14px 0 4px; color: #1d4ed8; }
+  .meta { font-size: 13px; color: #6b7280; }
+  .loading { color: #6b7280; }
+  .error { color: #b91c1c; background: #fef2f2; border-radius: 8px; padding: 10px; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .mini { border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px; }
+  .mini b { display: block; font-size: 13px; color: #374151; }
+  .mini span { font-size: 17px; }
+  .apibox { background: #111827; color: #e5e7eb; border-radius: 14px; padding: 16px; font-size: 13px; }
+  .apibox h2 { font-size: 15px; margin: 0 0 8px; color: #fff; }
+  .apibox ul { margin: 0; padding-left: 18px; }
+  .apibox li { margin-bottom: 8px; word-break: break-all; }
+  .apibox a { color: #93c5fd; }
+  .source { text-align: center; font-size: 12px; color: #6b7280; margin-top: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>💱 환율 계산기</h1>
+  <p class="sub">금액을 넣고 통화를 고르면 원화(KRW)로 바꿔 줘요.</p>
+
+  <section class="card" id="convertCard">
+    <h2>원화로 바꾸기</h2>
+    <div class="row">
+      <div class="field">
+        <label for="amount">금액</label>
+        <input id="amount" type="number" min="0" step="any" value="100">
+      </div>
+      <div class="field">
+        <label for="currency">통화</label>
+        <select id="currency"></select>
+      </div>
+    </div>
+    <div id="convertBody"><p class="loading">⏳ 불러오는 중...</p></div>
+  </section>
+
+  <section class="card" id="listCard">
+    <h2>1 단위당 원화</h2>
+    <div class="grid" id="miniGrid"></div>
+  </section>
+
+  <section class="apibox" id="apiBox">
+    <h2>🔌 이 화면이 쓰는 API</h2>
+    <ul id="apiList"></ul>
+  </section>
+
+  <p class="source">데이터 출처: Frankfurter (frankfurter.dev) · 유럽중앙은행(ECB) 기준 환율. 하루에 한 번 발표되는 값이라 위에 적힌 기준 날짜의 환율이에요.</p>
+</main>
+
+<script>
+const API = {
+  base: "https://api.frankfurter.dev/v1/latest", // 🔌 Frankfurter 환율 API 주소
+  to: "KRW", // 🔌 바꿔 받을 통화(원화)
+  currencies: ["USD", "JPY", "EUR", "CNY"] // 🔌 고를 수 있는 통화
+};
+
+const NAMES = { USD: "미국 달러", JPY: "일본 엔", EUR: "유로", CNY: "중국 위안" };
+const won = n => n.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
+
+function makeUrl(from, amount) {
+  return `${API.base}?base=${from}&symbols=${API.to}&amount=${amount}`;
+}
+
+// 실제로 부른 주소를 아래 상자에 적는다 (id 별로 한 줄)
+function showUsed(id, label, url) {
+  let li = document.getElementById("api-" + id);
+  if (!li) {
+    li = document.createElement("li");
+    li.id = "api-" + id;
+    document.getElementById("apiList").appendChild(li);
+  }
+  li.innerHTML = `${label}<br><code></code><br><a target="_blank" rel="noopener">새 탭에서 원본 JSON 보기</a>`;
+  li.querySelector("code").textContent = url;
+  li.querySelector("a").href = url;
+}
+
+async function getRate(from, amount) {
+  const url = makeUrl(from, amount);
+  const res = await fetch(url); // 🔌 API 호출
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  const data = await res.json();
+  if (!data.rates || typeof data.rates[API.to] !== "number") throw new Error("환율 데이터 없음");
+  return { url, value: data.rates[API.to], date: data.date };
+}
+
+// 카드 1: 입력한 금액 변환
+let seq = 0;
+async function convert() {
+  const body = document.getElementById("convertBody");
+  const from = document.getElementById("currency").value;
+  const amount = parseFloat(document.getElementById("amount").value);
+  if (!(amount >= 0)) {
+    body.innerHTML = `<p class="meta">금액을 숫자로 넣어 주세요.</p>`;
+    return;
+  }
+  const my = ++seq;
+  body.innerHTML = `<p class="loading">⏳ 불러오는 중...</p>`;
+  showUsed("convert", "변환 카드", makeUrl(from, amount));
+  try {
+    const r = await getRate(from, amount);
+    if (my !== seq) return;
+    body.innerHTML = `
+      <div class="result">${won(r.value)}원</div>
+      <div class="meta">${won(amount)} ${from} (${NAMES[from]}) → KRW</div>
+      <div class="meta">기준 날짜: ${r.date} (유럽중앙은행이 하루 한 번 발표하는 기준 환율)</div>`;
+  } catch (e) {
+    if (my !== seq) return;
+    body.innerHTML = `<div class="error">⚠️ 환율을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요. (${e.message})</div>`;
+  }
+}
+
+// 카드 2: 통화마다 따로 불러서 하나가 실패해도 나머지는 보이게
+function loadMini(from) {
+  const box = document.createElement("div");
+  box.className = "mini";
+  box.innerHTML = `<b>1 ${from} · ${NAMES[from]}</b><span class="loading">⏳ 불러오는 중...</span>`;
+  document.getElementById("miniGrid").appendChild(box);
+  showUsed("mini-" + from, `1 ${from} 카드`, makeUrl(from, 1));
+  getRate(from, 1).then(r => {
+    box.innerHTML = `<b>1 ${from} · ${NAMES[from]}</b><span>${won(r.value)}원</span><div class="meta">기준 ${r.date}</div>`;
+  }).catch(e => {
+    box.innerHTML = `<b>1 ${from} · ${NAMES[from]}</b><div class="error">⚠️ 불러오기 실패</div>`;
+  });
+}
+
+const sel = document.getElementById("currency");
+API.currencies.forEach(c => {
+  sel.insertAdjacentHTML("beforeend", `<option value="${c}">${c} · ${NAMES[c]}</option>`);
+  loadMini(c);
+});
+let timer;
+document.getElementById("amount").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(convert, 300); });
+sel.addEventListener("change", convert);
+convert();
+</script>
+</body>
+</html>

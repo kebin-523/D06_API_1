@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>우리 동네 날씨</title>
+<style>
+  body { font-family: sans-serif; background: #e8f1fb; display: flex; justify-content: center; padding: 40px 16px; }
+  .card { background: #fff; border-radius: 16px; padding: 32px 40px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,.1); min-width: 260px; }
+  .emoji { font-size: 72px; }
+  .temp { font-size: 48px; font-weight: bold; margin: 8px 0; }
+  .desc { font-size: 22px; color: #444; }
+  .place { margin-bottom: 12px; }
+  select { font-size: 18px; padding: 6px 10px; border-radius: 8px; border: 1px solid #ccc; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="place">
+      📍 <select id="city"></select>
+    </div>
+    <div class="emoji" id="emoji">⏳</div>
+    <div class="temp" id="temp">--°C</div>
+    <div class="desc" id="desc">불러오는 중...</div>
+  </div>
+
+<script>
+  // 🔌 도시별 latitude, longitude. 숫자를 바꾸거나 도시를 추가할 수 있습니다.
+  const cities = [
+    { name: "서울", latitude: 37.5665, longitude: 126.9780 },
+    { name: "부산", latitude: 35.1796, longitude: 129.0756 },
+    { name: "대구", latitude: 35.8714, longitude: 128.6014 },
+    { name: "인천", latitude: 37.4563, longitude: 126.7052 },
+    { name: "광주", latitude: 35.1595, longitude: 126.8526 },
+    { name: "대전", latitude: 36.3504, longitude: 127.3845 },
+    { name: "제주", latitude: 33.4996, longitude: 126.5312 },
+    { name: "도쿄", latitude: 35.6762, longitude: 139.6503 },
+    { name: "뉴욕", latitude: 40.7128, longitude: -74.0060 },
+    { name: "런던", latitude: 51.5074, longitude: -0.1278 },
+  ];
+
+  // 날씨 코드(WMO) → 말 + 이모지
+  function describe(code) {
+    if (code === 0) return ["맑음", "☀️"];
+    if (code === 1) return ["대체로 맑음", "🌤️"];
+    if (code === 2) return ["구름 조금", "⛅"];
+    if (code === 3) return ["흐림", "☁️"];
+    if (code === 45 || code === 48) return ["안개", "🌫️"];
+    if (code >= 51 && code <= 57) return ["이슬비", "🌦️"];
+    if (code >= 61 && code <= 67) return ["비", "🌧️"];
+    if (code >= 71 && code <= 77) return ["눈", "❄️"];
+    if (code >= 80 && code <= 82) return ["소나기", "🌦️"];
+    if (code === 85 || code === 86) return ["눈 소나기", "🌨️"];
+    if (code >= 95) return ["천둥번개", "⛈️"];
+    return ["알 수 없음", "❓"];
+  }
+
+  const select = document.getElementById("city");
+  cities.forEach((c, i) => select.add(new Option(c.name, i)));
+
+  let requestId = 0; // 빠르게 도시를 바꿀 때 늦게 온 이전 응답을 무시하기 위함
+
+  function loadWeather() {
+    const { latitude, longitude } = cities[select.value];
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code&timezone=auto`;
+    const myId = ++requestId;
+
+    document.getElementById("emoji").textContent = "⏳";
+    document.getElementById("temp").textContent = "--°C";
+    document.getElementById("desc").textContent = "불러오는 중...";
+
+    fetch(url)
+      .then(res => res.json())
+      .then(data => {
+        if (myId !== requestId) return;
+        const { temperature_2m, weather_code } = data.current;
+        const [text, emoji] = describe(weather_code);
+        document.getElementById("emoji").textContent = emoji;
+        document.getElementById("temp").textContent = temperature_2m + "°C";
+        document.getElementById("desc").textContent = text;
+      })
+      .catch(() => {
+        if (myId !== requestId) return;
+        document.getElementById("desc").textContent = "날씨를 불러오지 못했어요";
+      });
+  }
+
+  select.addEventListener("change", loadWeather);
+  loadWeather();
+</script>
+</body>
+</html>

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>아침 대시보드</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 16px; font-family: "Malgun Gothic", sans-serif; background: #f4f1ea; color: #1f2937; }
+  main { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .sub { color: #6b7280; font-size: 14px; margin: 0 0 20px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 16px; }
+  .card { background: #fff; border-radius: 14px; padding: 18px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  .card h2 { font-size: 15px; margin: 0 0 10px; color: #374151; }
+  .big { font-size: 30px; font-weight: bold; margin: 2px 0; }
+  .meta { font-size: 13px; color: #6b7280; margin-top: 4px; }
+  .part { padding: 8px 0; border-top: 1px solid #eee; }
+  .part:first-of-type { border-top: 0; }
+  .loading { color: #6b7280; }
+  .error { color: #b91c1c; background: #fef2f2; border-radius: 8px; padding: 10px; font-size: 14px; }
+  .row { display: flex; justify-content: space-between; align-items: center; }
+  .badge { padding: 3px 10px; border-radius: 999px; color: #fff; font-weight: bold; font-size: 13px; }
+  .g0 { background: #2563eb; } .g1 { background: #16a34a; } .g2 { background: #d97706; } .g3 { background: #dc2626; }
+  img.dog { width: 100%; max-height: 300px; object-fit: cover; border-radius: 10px; display: block; margin-bottom: 10px; }
+  button { padding: 8px 14px; font-size: 15px; border: 0; border-radius: 8px; background: #2563eb; color: #fff; cursor: pointer; }
+  .apibox { background: #111827; color: #e5e7eb; border-radius: 14px; padding: 16px; font-size: 13px; }
+  .apibox h2 { font-size: 15px; margin: 0 0 8px; color: #fff; }
+  .apibox ul { margin: 0; padding-left: 18px; }
+  .apibox li { margin-bottom: 8px; word-break: break-all; }
+  .apibox a { color: #93c5fd; }
+  .source { text-align: center; font-size: 12px; color: #6b7280; margin-top: 14px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="greeting">안녕하세요!</h1>
+  <p class="sub" id="today"></p>
+
+  <div class="cards">
+    <section class="card">
+      <h2>🌤️ 우리 동네 날씨와 미세먼지 (서울)</h2>
+      <div class="part" id="weatherBody"></div>
+      <div class="part" id="airBody"></div>
+    </section>
+
+    <section class="card">
+      <h2>💱 환율 (원화 기준)</h2>
+      <div class="part" id="usdBody"></div>
+      <div class="part" id="jpyBody"></div>
+    </section>
+
+    <section class="card">
+      <h2>🎌 다음 공휴일까지</h2>
+      <div id="holidayBody"></div>
+    </section>
+
+    <section class="card">
+      <h2>🐶 오늘의 강아지</h2>
+      <div id="dogBody"></div>
+      <button id="dogBtn" type="button">다른 강아지 보기</button>
+    </section>
+  </div>
+
+  <section class="apibox">
+    <h2>🔌 이 화면이 쓰는 API</h2>
+    <ul id="apiList"></ul>
+  </section>
+
+  <p class="source">
+    Weather data by Open-Meteo.com (날씨·미세먼지) · 환율: Frankfurter, 유럽중앙은행(ECB) 기준 환율로 하루에 한 번 발표되는 값 · 공휴일: Nager.Date · 강아지 사진: Dog CEO<br>
+    미세먼지 값은 모델로 계산한 추정값이라 에어코리아 측정값과 다를 수 있고, 등급은 환경부 기준(㎍/㎥)에 맞춘 참고용이에요.
+  </p>
+</main>
+
+<script>
+// 우리 동네를 바꾸려면 latitude / longitude 숫자를 바꾸세요 (서울: 37.5665, 126.978)
+const API = {
+  weather: "https://api.open-meteo.com/v1/forecast?latitude=37.5665&longitude=126.978&current=temperature_2m&timezone=auto", // 🔌 1) 날씨(기온)
+  air: "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=37.5665&longitude=126.978&current=pm10,pm2_5&timezone=auto", // 🔌 1) 미세먼지
+  usd: "https://api.frankfurter.dev/v1/latest?base=USD&symbols=KRW&amount=1", // 🔌 2) 1달러 → 원
+  jpy: "https://api.frankfurter.dev/v1/latest?base=JPY&symbols=KRW&amount=100", // 🔌 2) 100엔 → 원
+  holiday: "https://date.nager.at/api/v3/NextPublicHolidays/KR", // 🔌 3) 한국 다음 공휴일들
+  dog: "https://dog.ceo/api/breeds/image/random" // 🔌 4) 랜덤 강아지 사진
+};
+
+// 환경부 기준 (㎍/㎥): [좋음 최대, 보통 최대, 나쁨 최대], 그 위는 매우나쁨
+const LIMITS = { pm10: [30, 80, 150], pm2_5: [15, 35, 75] };
+const GRADES = ["좋음", "보통", "나쁨", "매우나쁨"];
+function grade(kind, v) {
+  const i = LIMITS[kind].findIndex(max => v <= max);
+  return i === -1 ? 3 : i;
+}
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const won = n => n.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
+
+// 인사말: 아침(5~10시) · 점심(11~16시) · 저녁(17~4시)
+const now = new Date();
+const hour = now.getHours();
+const hello = hour >= 5 && hour < 11 ? "☀️ 좋은 아침이에요!"
+            : hour >= 11 && hour < 17 ? "🍚 점심 맛있게 드세요!"
+            : "🌙 좋은 저녁이에요!";
+$("greeting").textContent = hello;
+$("today").textContent = now.toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "long" });
+
+// 실제로 부른 주소를 아래 상자에 적는다
+function showUsed(id, label, url) {
+  let li = $("api-" + id);
+  if (!li) {
+    li = document.createElement("li");
+    li.id = "api-" + id;
+    $("apiList").appendChild(li);
+  }
+  li.innerHTML = `${label}<br><code></code><br><a target="_blank" rel="noopener">새 탭에서 원본 JSON 보기</a>`;
+  li.querySelector("code").textContent = url;
+  li.querySelector("a").href = url;
+}
+
+// 칸 하나를 따로 불러온다: 로딩 → 성공이면 render, 실패면 그 칸에만 실패 화면
+async function load(id, label, url, render) {
+  const box = $(id + "Body");
+  box.innerHTML = `<p class="loading">⏳ ${label} 불러오는 중...</p>`;
+  showUsed(id, label, url);
+  try {
+    const res = await fetch(url); // 🔌 API 호출
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    box.innerHTML = render(data);
+  } catch (e) {
+    box.innerHTML = `<div class="error">⚠️ ${esc(label)}을(를) 불러오지 못했어요. (${esc(e.message)})</div>`;
+  }
+}
+
+const when = t => esc(String(t).replace("T", " "));
+
+load("weather", "기온", API.weather, d => {
+  const c = d.current;
+  if (!c || typeof c.temperature_2m !== "number") throw new Error("기온 데이터 없음");
+  return `<div class="big">${c.temperature_2m}°C</div><div class="meta">기준 시각: ${when(c.time)} (현지 시간)</div>`;
+});
+
+load("air", "미세먼지", API.air, d => {
+  const c = d.current;
+  if (!c || typeof c.pm10 !== "number" || typeof c.pm2_5 !== "number") throw new Error("미세먼지 데이터 없음");
+  const row = (label, kind, v) => {
+    const g = grade(kind, v);
+    return `<div class="row"><span>${label} <b>${v}</b> ㎍/㎥</span><span class="badge g${g}">${GRADES[g]}</span></div>`;
+  };
+  return row("미세먼지(PM10)", "pm10", c.pm10) + row("초미세먼지(PM2.5)", "pm2_5", c.pm2_5) +
+    `<div class="meta">기준 시각: ${when(c.time)} (현지 시간)</div>`;
+});
+
+const fxRender = unit => d => {
+  if (!d.rates || typeof d.rates.KRW !== "number") throw new Error("환율 데이터 없음");
+  return `<div class="big">${unit} = ${won(d.rates.KRW)}원</div><div class="meta">기준 날짜: ${esc(d.date)} (유럽중앙은행이 하루 한 번 발표하는 기준 환율)</div>`;
+};
+load("usd", "1달러 환율", API.usd, fxRender("1달러"));
+load("jpy", "100엔 환율", API.jpy, fxRender("100엔"));
+
+load("holiday", "공휴일", API.holiday, list => {
+  if (!Array.isArray(list) || !list.length) throw new Error("공휴일 데이터 없음");
+  const h = list[0];
+  const [y, m, d] = h.date.split("-").map(Number);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.round((new Date(y, m - 1, d) - today) / 86400000);
+  const dday = days === 0 ? "D-Day" : days > 0 ? "D-" + days : "D+" + (-days);
+  return `<div class="big">${dday}</div><div class="meta">${esc(h.localName || h.name)} · 기준 날짜: ${esc(h.date)}</div>`;
+});
+
+const dogRender = d => {
+  if (!d.message || d.status !== "success") throw new Error("사진 주소 없음");
+  const img = document.createElement("img");
+  img.className = "dog";
+  img.alt = "랜덤 강아지 사진";
+  img.src = d.message;
+  return img.outerHTML;
+};
+load("dog", "강아지 사진", API.dog, dogRender);
+$("dogBtn").addEventListener("click", () => load("dog", "강아지 사진", API.dog, dogRender));
+</script>
+</body>
+</html>

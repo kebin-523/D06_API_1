@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>미술 작품 갤러리</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 16px 32px; font-family: "Malgun Gothic", sans-serif; background: #1c1917; color: #e7e5e4; }
+  main { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 28px; margin: 0 0 4px; color: #fafaf9; }
+  .sub { color: #a8a29e; font-size: 14px; margin: 0 0 16px; }
+  form { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  input { flex: 1; min-width: 200px; padding: 10px 12px; font-size: 16px; border: 1px solid #44403c; border-radius: 8px; background: #292524; color: #fafaf9; }
+  button { padding: 10px 18px; font-size: 16px; border: 0; border-radius: 8px; background: #b91c1c; color: #fff; cursor: pointer; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .chips button { padding: 4px 12px; font-size: 13px; background: #44403c; color: #e7e5e4; }
+  .status { font-size: 13px; color: #a8a29e; margin-bottom: 14px; min-height: 18px; }
+  .loading { color: #a8a29e; }
+  .error { color: #fecaca; background: #450a0a; border-radius: 8px; padding: 12px; font-size: 14px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 18px; margin-bottom: 28px; }
+
+  /* 뒤집히는 카드 */
+  .flip { perspective: 1000px; aspect-ratio: 3 / 4; cursor: pointer; outline-offset: 4px; }
+  .flip:focus-visible { outline: 3px solid #fbbf24; }
+  .inner { position: relative; width: 100%; height: 100%; transition: transform .6s; transform-style: preserve-3d; }
+  .flip.turned .inner { transform: rotateY(180deg); }
+  .face { position: absolute; inset: 0; border-radius: 12px; overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+  .front { background: #292524; }
+  .front img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .front .noimg { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 13px; color: #a8a29e; padding: 12px; }
+  .front .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 28px 12px 10px; font-size: 13px; line-height: 1.35; color: #fff; background: linear-gradient(transparent, rgba(0,0,0,.8)); }
+  .front .hint { position: absolute; top: 8px; right: 8px; font-size: 12px; background: rgba(0,0,0,.55); color: #fff; padding: 3px 8px; border-radius: 999px; opacity: 0; transition: opacity .2s; }
+  .flip:hover .hint, .flip:focus-visible .hint { opacity: 1; }
+  .back { transform: rotateY(180deg); background: #fafaf9; color: #1c1917; padding: 14px; overflow-y: auto; font-size: 13px; line-height: 1.5; }
+  .back h3 { font-size: 15px; margin: 0 0 8px; line-height: 1.35; }
+  .back dl { margin: 0 0 10px; }
+  .back dt { font-size: 11px; color: #78716c; margin-top: 7px; }
+  .back dd { margin: 0; }
+  .back a { color: #b91c1c; font-weight: bold; }
+
+  .apibox { background: #0c0a09; color: #e5e7eb; border: 1px solid #292524; border-radius: 14px; padding: 16px; font-size: 13px; }
+  .apibox h2 { font-size: 15px; margin: 0 0 8px; color: #fff; }
+  .apibox ul { margin: 0; padding-left: 18px; }
+  .apibox li { margin-bottom: 8px; word-break: break-all; }
+  .apibox a { color: #93c5fd; }
+  .apibox summary { cursor: pointer; margin: 6px 0; }
+  .source { text-align: center; font-size: 12px; color: #a8a29e; margin-top: 14px; line-height: 1.6; }
+
+  @media (prefers-reduced-motion: reduce) { .inner { transition: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>🖼️ 미술 작품 갤러리</h1>
+  <p class="sub">메트로폴리탄 미술관의 작품이에요. 카드를 누르면 뒤집혀서 작품 정보가 보여요. 영어 검색어가 잘 맞아요.</p>
+
+  <form id="form">
+    <input id="q" value="monet" placeholder="예: monet, cat, sunflower, samurai" aria-label="검색어">
+    <button type="submit">검색</button>
+  </form>
+  <div class="chips" id="chips"></div>
+
+  <div class="status" id="status"></div>
+  <div id="gallery"></div>
+
+  <section class="apibox">
+    <h2>🔌 이 화면이 쓰는 API</h2>
+    <ul id="apiList"></ul>
+    <details>
+      <summary>작품 상세 주소 <span id="objCount">0</span>개 (작품마다 따로 부름)</summary>
+      <ul id="objList"></ul>
+    </details>
+  </section>
+
+  <p class="source">
+    작품 정보와 사진: The Metropolitan Museum of Art Collection API (Open Access). 사진을 쓸 수 있는 작품만 보여 줘요.<br>
+    카드의 연도는 작품을 만든 해이고, 데이터를 받은 날짜가 아니에요.
+  </p>
+</main>
+
+<script>
+const API = {
+  search: "https://collectionapi.metmuseum.org/public/collection/v1.1/search", // 🔌 검색어 → 작품 번호들
+  object: "https://collectionapi.metmuseum.org/public/collection/v1/objects" // 🔌 작품 번호 → 작품 정보(사진, 제목, 작가...)
+};
+const SHOW = 12; // 보여 줄 작품 수
+const TRY = 20; // 사진 없는 작품이 섞여 있어서 넉넉히 받아 사진 있는 것만 보여 줌
+
+const $ = id => document.getElementById(id);
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+};
+function link(url, text) {
+  const a = el("a", null, text);
+  a.href = url; a.target = "_blank"; a.rel = "noopener";
+  return a;
+}
+
+// 실제로 부른 주소를 아래 상자에 적는다
+function showUsed(id, label, url) {
+  let li = $("api-" + id);
+  if (!li) { li = el("li"); li.id = "api-" + id; $("apiList").appendChild(li); }
+  li.replaceChildren(document.createTextNode(label), el("br"), el("code", null, url), el("br"), link(url, "새 탭에서 원본 JSON 보기"));
+}
+
+async function getJson(url) {
+  const res = await fetch(url); // 🔌 API 호출
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json();
+}
+
+// 카드 앞면: 사진 중심. 뒷면: 작품 정보.
+function makeCard(o) {
+  const title = o.title || "(제목 없음)";
+  const card = el("div", "flip");
+  card.tabIndex = 0;
+  card.setAttribute("role", "button");
+  card.setAttribute("aria-pressed", "false");
+  card.setAttribute("aria-label", title + " — 누르면 작품 정보가 보여요");
+
+  const inner = el("div", "inner");
+  const front = el("div", "face front");
+  const img = el("img");
+  img.src = o.primaryImageSmall; img.alt = title; img.loading = "lazy";
+  img.onerror = () => img.replaceWith(el("div", "noimg", "사진을 불러오지 못했어요"));
+  front.append(img, el("div", "hint", "눌러서 뒤집기"), el("div", "cap", title));
+
+  const back = el("div", "face back");
+  back.append(el("h3", null, title));
+  const dl = el("dl");
+  const row = (label, value) => {
+    if (!value) return;
+    dl.append(el("dt", null, label), el("dd", null, value));
+  };
+  row("작가", [o.artistDisplayName, o.artistDisplayBio].filter(Boolean).join(" · ") || "작가 미상");
+  row("제작 연도", o.objectDate);
+  row("재료·기법", o.medium);
+  row("크기", o.dimensions);
+  row("분류", [o.department, o.classification].filter(Boolean).join(" / "));
+  row("문화권", o.culture);
+  row("소장 경위", o.creditLine);
+  back.append(dl);
+  if (o.objectURL) {
+    const a = link(o.objectURL, "메트 사이트에서 보기 ↗");
+    a.addEventListener("click", e => e.stopPropagation()); // 링크를 눌러도 카드는 안 뒤집힘
+    back.append(a);
+  }
+
+  inner.append(front, back);
+  card.append(inner);
+  const toggle = () => {
+    const on = card.classList.toggle("turned");
+    card.setAttribute("aria-pressed", String(on));
+  };
+  card.addEventListener("click", toggle);
+  card.addEventListener("keydown", e => {
+    if (e.target !== card) return; // 뒷면 링크의 Enter는 그대로 둔다
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+  });
+  return card;
+}
+
+let seq = 0;
+async function search(q) {
+  q = q.trim();
+  if (!q) return;
+  const my = ++seq;
+  const gallery = $("gallery"), status = $("status");
+  gallery.replaceChildren(el("p", "loading", "⏳ 메트로폴리탄에서 불러오는 중..."));
+  status.textContent = "";
+  $("objList").replaceChildren(); $("objCount").textContent = "0";
+
+  const url = `${API.search}?q=${encodeURIComponent(q)}&hasImages=true&isPublicDomain=true&limit=${TRY}`;
+  showUsed("search", "작품 검색", url);
+  let ids;
+  try {
+    const data = await getJson(url);
+    if (my !== seq) return;
+    ids = data.objectIDs;
+    if (!Array.isArray(ids) || !ids.length) {
+      gallery.replaceChildren(el("div", "error", "⚠️ 작품을 찾지 못했어요. 다른 검색어를 써 보세요."));
+      return;
+    }
+  } catch (e) {
+    if (my === seq) gallery.replaceChildren(el("div", "error", "⚠️ 작품 목록을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요. (" + e.message + ")"));
+    return;
+  }
+
+  // 작품마다 따로 불러서, 하나가 실패해도 나머지는 그대로 보임
+  const grid = el("div", "grid");
+  gallery.replaceChildren(grid);
+  status.textContent = "작품 정보를 불러오는 중...";
+  let shown = 0, done = 0, failed = 0;
+  const finish = () => {
+    if (my !== seq || done < ids.length) return;
+    if (!shown) {
+      gallery.replaceChildren(el("div", "error", failed
+        ? "⚠️ 작품 정보를 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요."
+        : "⚠️ 사진을 쓸 수 있는 작품이 없어요. 다른 검색어를 써 보세요."));
+      status.textContent = "";
+      return;
+    }
+    status.textContent = `사진이 있는 작품 ${shown}점이에요. 카드를 눌러 보세요.` + (failed ? ` (${failed}점은 불러오지 못했어요)` : "");
+  };
+  ids.forEach(id => {
+    const u = `${API.object}/${id}`;
+    const li = el("li");
+    li.append(document.createTextNode("작품 " + id), el("br"), el("code", null, u), el("br"), link(u, "새 탭에서 원본 JSON 보기"));
+    $("objList").append(li);
+    $("objCount").textContent = $("objList").children.length;
+    getJson(u).then(o => {
+      if (my !== seq) return;
+      if (o.primaryImageSmall && shown < SHOW) { grid.append(makeCard(o)); shown++; }
+    }).catch(() => { failed++; }).finally(() => { done++; finish(); });
+  });
+}
+
+$("form").addEventListener("submit", e => { e.preventDefault(); search($("q").value); });
+["monet", "cat", "sunflower", "samurai", "horse"].forEach(w => {
+  const b = el("button", null, w);
+  b.type = "button";
+  b.onclick = () => { $("q").value = w; search(w); };
+  $("chips").append(b);
+});
+search($("q").value);
+</script>
+</body>
+</html>
